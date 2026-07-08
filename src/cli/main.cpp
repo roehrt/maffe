@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cctype>
+#include <csignal>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -104,6 +105,10 @@ ParsedInput read_input() {
 } // namespace
 
 int main(int argc, char** argv) {
+#if MAFFE_COMPETITION_BUILD
+    std::signal(SIGTERM, SIG_IGN);
+#endif
+
     std::ios::sync_with_stdio(false);
     std::cin.tie(nullptr);
 

@@ -209,7 +209,7 @@ endif
 
 competition_cli_targets = [
   ['maffe-exact', '-1', '0', '0'],
-  ['maffe-heuristic', '295', '1', '0'],
+  ['maffe-heuristic', '285', '1', '0'],
   ['maffe-lowerbound', '-1', '0', '1'],
 ]
 

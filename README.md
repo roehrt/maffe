@@ -1,6 +1,11 @@
 # maffe
 
-`maffe` is an exact and heuristic solver for maximum agreement forest for two or more rooted phylogenetic trees.
+`maffe` is an exact and heuristic solver for maximum agreement forest for two or more rooted bifurcating phylogenetic trees.
+It won the first place in all three tracks (Exact, Heuristic, Lower Bound) of the [PACE challenge 2026](https://pacechallenge.org/2026/).
+
+**Acknowledgements** The implementation was assisted by OpenAI’s Codex with GPT 5.4 and GPT
+5.5. We extensively tested the solver with fuzzing and [STRIDE instances](https://pace2026.imada.sdu.dk/) and take responsibility for
+its correctness.
 
 ## Dependencies
 
@@ -12,7 +17,9 @@
 - pkg-config
 - patch
 
-The solver depends on SCIP Optimization Suite 10.0.2, HiGHS 1.15.1, and SoPlex, which are automatically included as submodules. The competition build also includes ConicBundle for the heuristic binary.
+The solver depends on SCIP Optimization Suite 10.0.2 and HiGHS 1.15.1.
+The competition build also uses ConicBundle for the heuristic binary.
+The Meson build script will automatically download and build all required solver dependencies.
 We optionally support Gurobi as (I)LP backend and expose Python bindings.
 
 ## Build
@@ -31,11 +38,13 @@ meson setup build --buildtype=release
 meson compile -C build
 ```
 
-Run the solver with:
+Run the solver with
 
 ```sh
 ./build/maffe < instance.trees
 ```
+
+where `instances.trees` contains a list of bifurcating phylogenetic trees. 
 
 ## Competition Build
 

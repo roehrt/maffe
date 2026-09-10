@@ -2,7 +2,7 @@ option(
   'competition',
   type : 'boolean',
   value : false,
-  description : 'Build the competition-oriented profile.',
+  description : 'Build the competition profile.',
 )
 
 option(

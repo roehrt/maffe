@@ -3,6 +3,7 @@
 
 #include "config.hpp"
 #include "maffe.hpp"
+#include "maffe_unrooted.hpp"
 
 #include <cctype>
 #include <format>
@@ -141,6 +142,19 @@ PYBIND11_MODULE(maffe, m) {
         py::kw_only(),
         py::arg("approx_factor") = 1.0,
         py::arg("approx_offset") = 0,
+        py::arg("log_level") = py::int_(0)
+    );
+    m.def(
+        "solve_unrooted",
+        [log_level_type](const std::vector<std::string>& trees,
+            const py::object& log_level) {
+            maffe::experimental::UnrootedOptions options;
+            options.log_level = parse_log_level(log_level.ptr(), *log_level_type);
+            py::gil_scoped_release release;
+            return maffe::experimental::solve_unrooted(trees, options).partition;
+        },
+        py::arg("trees"),
+        py::kw_only(),
         py::arg("log_level") = py::int_(0)
     );
     m.def(

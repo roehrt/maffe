@@ -180,6 +180,7 @@ core_sources = [
   'src/branchandprice/master/set_packing_heuristic.cpp',
   'src/branchandprice/master/set_packing_scip.cpp',
   'src/compact/compact_solver.cpp',
+  'src/compact/unrooted_solver.cpp',
   'src/heuristic/colgen_heuristic.cpp',
   'src/heuristic/node_coverage.cpp',
   'src/maffe/maffe.cpp',
@@ -251,6 +252,14 @@ if competition
     )
   endforeach
 else
+  executable(
+    'maffe-unrooted',
+    'src/cli/unrooted_main.cpp',
+    include_directories: include_dirs,
+    dependencies: dependencies,
+    link_with: core_lib,
+    install: true,
+  )
   executable(
     'maffe',
     cli_sources,

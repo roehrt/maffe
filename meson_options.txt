@@ -6,6 +6,13 @@ option(
 )
 
 option(
+  'cli',
+  type : 'boolean',
+  value : true,
+  description : 'Build the command-line executables.',
+)
+
+option(
   'python',
   type : 'boolean',
   value : false,

@@ -2,7 +2,7 @@ project(
   'maffe',
   'cpp',
   meson_version: '>= 1.3.0',
-  version: '0.1',
+  version: '0.1.1',
   license: 'MIT',
   default_options: ['warning_level=3', 'cpp_std=c++23', 'b_lto=true'],
 )
@@ -37,6 +37,7 @@ highs_options.add_cmake_defines(
     'BUILD_CXX_EXE': 'OFF',
     'BUILD_EXAMPLES': 'OFF',
     'BUILD_TESTING': 'OFF',
+    'CMAKE_POSITION_INDEPENDENT_CODE': 'ON',
     'ZLIB': 'OFF',
   },
 )
@@ -96,7 +97,7 @@ scip_cmake_defines = {
   'NO_EXTERNAL_CODE': 'on',
   'PAPILO': 'off',
   'READLINE': 'off',
-  'SOPLEX': 'on',
+  'SOPLEX': competition ? 'on' : 'off',
   'SHARED': 'off',
   'SYM': 'none',
   'THREADSAFE': 'off',
@@ -122,13 +123,13 @@ scip_options.add_cmake_defines(scip_cmake_defines)
 
 scipoptsuite_project = cmake.subproject('scipoptsuite', options: scip_options)
 scip_dep = scipoptsuite_project.dependency('libscip')
-soplex_dep = scipoptsuite_project.dependency('libsoplex')
-
 dependencies = [
   scip_dep,
-  soplex_dep,
   highs_dep,
 ] + gurobi_deps + conicbundle_deps
+if competition
+  dependencies += [scipoptsuite_project.dependency('libsoplex')]
+endif
 
 git_prog = find_program('git', required: false)
 git_hash = 'unknown'
@@ -252,23 +253,25 @@ if competition
     )
   endforeach
 else
-  executable(
-    'maffe-unrooted',
-    'src/cli/unrooted_main.cpp',
-    include_directories: include_dirs,
-    dependencies: dependencies,
-    link_with: core_lib,
-    install: true,
-  )
-  executable(
-    'maffe',
-    cli_sources,
-    include_directories: include_dirs,
-    dependencies: dependencies,
-    link_with: core_lib,
-    link_args: cli_link_args,
-    install: true,
-  )
+  if get_option('cli')
+    executable(
+      'maffe-unrooted',
+      'src/cli/unrooted_main.cpp',
+      include_directories: include_dirs,
+      dependencies: dependencies,
+      link_with: core_lib,
+      install: true,
+    )
+    executable(
+      'maffe',
+      cli_sources,
+      include_directories: include_dirs,
+      dependencies: dependencies,
+      link_with: core_lib,
+      link_args: cli_link_args,
+      install: true,
+    )
+  endif
   if python_enabled
     py.extension_module(
       'maffe',

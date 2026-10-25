@@ -20,3 +20,5 @@ subprojects/mimalloc-*
 subprojects/ConicBundle
 .codex
 *.log
+__pycache__/
+wheelhouse/

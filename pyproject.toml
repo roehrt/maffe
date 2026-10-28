@@ -36,5 +36,5 @@ config-settings = { compile-args = "-j4" }
 
 [tool.cibuildwheel.windows]
 before-build = "python -m pip install delvewheel==1.12.0"
-repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
+repair-wheel-command = 'python "{project}/scripts/repair_windows_wheel.py" "{wheel}" "{dest_dir}"'
 test-command = "python {project}/scripts/test_windows_wheel.py {project}/tests/test_python.py"

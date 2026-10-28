@@ -274,12 +274,18 @@ else
     )
   endif
   if python_enabled
+    python_link_args = []
+    if host_machine.system() == 'windows' and cpp.get_id() == 'gcc'
+      # Keep the GCC runtimes part of the extension rather than ship standalone DLLs.
+      python_link_args += ['-static-libgcc', '-static-libstdc++']
+    endif
     py.extension_module(
       'maffe',
       'bindings/python/module.cpp',
       include_directories: include_dirs,
       dependencies: dependencies + [py_dep, pybind11_dep],
       link_with: core_lib,
+      link_args: python_link_args,
       install: true,
     )
   endif

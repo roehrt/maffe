@@ -14,7 +14,9 @@ def main():
     env = os.environ.copy()
     # Python itself is located by its absolute path, and its own DLLs are next to it.
     # Leave only Windows system paths, excluding MinGW, MSYS2 and other toolchains.
-    windows = Path(env['SystemRoot'])
+    # Windows' os.environ normalizes keys to uppercase; its plain dict copy
+    # above no longer provides case-insensitive lookup.
+    windows = Path(env['SYSTEMROOT'])
     env['PATH'] = os.pathsep.join(map(str, (windows / 'System32', windows)))
     with tempfile.TemporaryDirectory() as test_dir:
         subprocess.run(

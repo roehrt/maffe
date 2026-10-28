@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from pathlib import Path
 import tomllib
 
@@ -19,9 +20,11 @@ def plan(event_name, ref_type, ref_name, event, version):
     inputs = event.get('inputs', {}) if event_name == 'workflow_dispatch' else {}
     if release:
         choices = {f'v{version}': 'all', **{f'v{version}-{key}': key for key in PLATFORMS}}
-        if ref_name not in choices:
+        # A fresh retry tag keeps previous release tags immutable.
+        release_name = re.sub(r'-r[1-9][0-9]*$', '', ref_name)
+        if release_name not in choices:
             raise ValueError(f'Release tag {ref_name!r} does not match version {version}')
-        scope = choices[ref_name]
+        scope = choices[release_name]
     elif event_name == 'workflow_dispatch':
         scope = inputs.get('platforms', 'all')
     elif event_name == 'push' and '[windows-only]' in (event.get('head_commit') or {}).get('message', ''):

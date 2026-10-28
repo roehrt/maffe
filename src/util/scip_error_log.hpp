@@ -82,7 +82,8 @@ inline void log_prefixed_lines(const std::string_view prefix, const char* const 
 
 namespace detail {
 
-inline thread_local std::vector<std::string_view> prefix_stack;
+// One definition avoids duplicate TLS initializers with MinGW.
+extern thread_local std::vector<std::string_view> prefix_stack;
 
 inline SCIP_DECL_ERRORPRINTING(error_printing) {
     (void)data;

@@ -17,6 +17,10 @@ permissions:
 
 jobs:
   wheels:
+    # A marked branch push runs only Windows; PRs, tags and manual runs stay full.
+    if: >-
+      !(github.event_name == 'push' && github.ref_type == 'branch' &&
+        contains(github.event.head_commit.message, '[windows-only]'))
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -52,19 +56,16 @@ jobs:
       fail-fast: false
       matrix:
         python: [cp311, cp312, cp313, cp314]
-        platform:
-          - name: linux-arm64
-            runner: ubuntu-24.04-arm
-            identifier: manylinux_aarch64
-          - name: macos-arm64
-            runner: macos-15
-            identifier: macosx_arm64
-          - name: macos-x86_64
-            runner: macos-15-intel
-            identifier: macosx_x86_64
-          - name: windows-x86_64
-            runner: windows-2022
-            identifier: win_amd64
+        platform: >-
+          ${{ fromJSON(
+            github.event_name == 'push' && github.ref_type == 'branch' &&
+            contains(github.event.head_commit.message, '[windows-only]') &&
+            '[{"name":"windows-x86_64","runner":"windows-2022","identifier":"win_amd64"}]' ||
+            '[{"name":"linux-arm64","runner":"ubuntu-24.04-arm","identifier":"manylinux_aarch64"},
+              {"name":"macos-arm64","runner":"macos-15","identifier":"macosx_arm64"},
+              {"name":"macos-x86_64","runner":"macos-15-intel","identifier":"macosx_x86_64"},
+              {"name":"windows-x86_64","runner":"windows-2022","identifier":"win_amd64"}]'
+          ) }}
     env:
       # Match the toolchain baseline used by the published Linux x86-64 wheels.
       CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28

@@ -194,6 +194,7 @@ core_sources = [
   'src/reductions/orchestrator.cpp',
   'src/reductions/three_two_reduction.cpp',
   'src/newick/newick.cpp',
+  'src/util/scip_error_log.cpp',
 ]
 
 include_dirs = include_directories('.', 'include', 'src')

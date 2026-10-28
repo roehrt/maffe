@@ -1,9 +1,9 @@
-name: Linux Python wheels
+name: Python wheels
 
 on:
   pull_request:
   push:
-    branches: [main, unrooted]
+    branches: [main, unrooted, pypi-packaging]
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -43,6 +43,54 @@ jobs:
           name: wheels-linux-x86_64-${{ matrix.python }}
           path: dist-wheels/*.whl
           if-no-files-found: error
+
+  additional-platform-wheels:
+    name: ${{ matrix.platform.name }} / ${{ matrix.python }}
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        python: [cp311, cp312, cp313, cp314]
+        platform:
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+            identifier: manylinux_aarch64
+          - name: macos-arm64
+            runner: macos-15
+            identifier: macosx_arm64
+          - name: macos-x86_64
+            runner: macos-15-intel
+            identifier: macosx_x86_64
+          - name: windows-x86_64
+            runner: windows-2022
+            identifier: win_amd64
+    env:
+      # Match the toolchain baseline used by the published Linux x86-64 wheels.
+      CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
+      # Keep native compilation within the smaller macOS runners' memory budget.
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+      CIBW_CONFIG_SETTINGS: 'compile-args=-j2'
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheel and test the installed package
+        # --only overrides the Linux x86-64 build selection in pyproject.toml.
+        # cibuildwheel runs that file's test-command against the installed wheel.
+        run: python -m cibuildwheel --only ${{ matrix.python }}-${{ matrix.platform.identifier }} --output-dir dist-wheels
+      - uses: actions/upload-artifact@v4
+        with:
+          # These artifacts are deliberately excluded from the publishing jobs.
+          name: experimental-wheels-${{ matrix.platform.name }}-${{ matrix.python }}
+          path: dist-wheels/*.whl
+          if-no-files-found: error
+          retention-days: 7
 
   publish-testpypi:
     name: Publish to TestPyPI

@@ -30,12 +30,11 @@ public:
 private:
     int parse_subtree(Tree& tree) {
         skip_space();
+        Node node;
         if (peek() == '(') {
             ++pos;
-
-            std::vector<int> children;
             while (true) {
-                children.push_back(parse_subtree(tree));
+                node.children.push_back(parse_subtree(tree));
                 skip_space();
                 if (peek() == ',') {
                     ++pos;
@@ -45,22 +44,14 @@ private:
             }
 
             expect(')');
-
-            Node node;
-            node.children = std::move(children);
-            node.label = parse_label();
-            skip_branch_length();
-
-            tree.nodes.push_back(std::move(node));
-            return static_cast<int>(tree.nodes.size()) - 1;
         }
 
-        const std::string label = parse_label();
-        if (label.empty())
+        node.label = parse_label();
+        if (node.children.empty() && node.label.empty())
             throw std::invalid_argument("missing leaf label in Newick input");
         skip_branch_length();
 
-        tree.nodes.push_back(Node{.children = {}, .label = label});
+        tree.nodes.push_back(std::move(node));
         return static_cast<int>(tree.nodes.size()) - 1;
     }
 
@@ -122,32 +113,10 @@ private:
     std::size_t pos = 0;
 };
 
-std::string write_node(const Tree& tree, const int node) {
-    const auto &[children, label] = tree.nodes[node];
-    if (children.empty())
-        return label;
-
-    std::string result = "(";
-    for (std::size_t i = 0; i < children.size(); ++i) {
-        if (i != 0)
-            result.push_back(',');
-        result += write_node(tree, children[i]);
-    }
-    result.push_back(')');
-    result += label;
-    return result;
-}
-
 } // namespace
 
 Tree parse(const std::string_view text) {
     return Parser(text).parse();
-}
-
-std::string write(const Tree& tree) {
-    if (tree.root < 0 || static_cast<std::size_t>(tree.root) >= tree.nodes.size())
-        throw std::invalid_argument("invalid Newick tree");
-    return write_node(tree, tree.root) + ';';
 }
 
 } // namespace maffe::newick

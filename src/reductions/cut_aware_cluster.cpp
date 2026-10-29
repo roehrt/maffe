@@ -48,14 +48,6 @@ struct PartialChoice {
     int leaf_count = 0;
     std::array<Interval, 2> intervals{};
     int interval_count = 0;
-
-    template <class F>
-    void for_each_leaf(const std::vector<int> &leaf_order, F &&visit) const {
-        for (int i = 0; i < interval_count; ++i) {
-            for (int pos = intervals[i].begin; pos < intervals[i].end; ++pos)
-                visit(leaf_order[pos]);
-        }
-    }
 };
 
 struct ChoiceKey {
@@ -842,7 +834,7 @@ class ClosureSearch {
     [[nodiscard]] std::optional<CutAwareCluster> best_cluster() {
         check_timeout();
         consider_whole_component_clusters();
-        if (search_done())
+        if (has_optimal_target_cluster())
             return finalize_best();
         const int seed_side =
             static_cast<int>(info_[0].components.size() + info_[0].choices.size()) <=
@@ -874,19 +866,13 @@ class ClosureSearch {
                     if (preferred && preferred_seed_side_leaves_.has_value())
                         return true;
                 }
-                if (search_done())
+                if (has_optimal_target_cluster())
                     return true;
             }
             return false;
         };
         if (!scan_seeds(true) && !best_.has_value())
             scan_seeds(false);
-        return finalize_best();
-    }
-
-    [[nodiscard]] std::optional<CutAwareCluster> best_none_none_cluster() {
-        check_timeout();
-        consider_whole_component_clusters();
         return finalize_best();
     }
 
@@ -997,10 +983,6 @@ class ClosureSearch {
 
     [[nodiscard]] bool has_optimal_target_cluster() const {
         return best_.has_value() && static_cast<int>(best_->leaves.size()) == target_cluster_leaves();
-    }
-
-    [[nodiscard]] bool search_done() const {
-        return has_optimal_target_cluster();
     }
 
     [[nodiscard]] std::optional<CutAwareCluster> finalize_best() {
@@ -1346,7 +1328,7 @@ class ClosureSearch {
                     cluster.leaves.push_back(info_[0].leaf_order[pos]);
             }
             static_cast<void>(consider_cluster(std::move(cluster)));
-            if (search_done())
+            if (has_optimal_target_cluster())
                 break;
         }
     }
@@ -2000,48 +1982,7 @@ class TreeBuilder {
     return summary;
 }
 
-[[nodiscard]] Result combine_side_summaries(SideSummary first, SideSummary second) {
-    Result combined{
-        .partition = {},
-        .feasible = true,
-    };
-    combined.partition.insert(
-        combined.partition.end(),
-        std::make_move_iterator(first.closed_blocks.begin()),
-        std::make_move_iterator(first.closed_blocks.end()));
-    combined.partition.insert(
-        combined.partition.end(),
-        std::make_move_iterator(second.closed_blocks.begin()),
-        std::make_move_iterator(second.closed_blocks.end()));
-    if (!first.bridge_block.empty() && !second.bridge_block.empty()) {
-        std::vector<int> merged = std::move(first.bridge_block);
-        merged.insert(merged.end(), second.bridge_block.begin(), second.bridge_block.end());
-        std::ranges::sort(merged);
-        combined.partition.push_back(std::move(merged));
-    } else if (!first.bridge_block.empty()) {
-        combined.partition.push_back(std::move(first.bridge_block));
-    } else if (!second.bridge_block.empty()) {
-        combined.partition.push_back(std::move(second.bridge_block));
-    }
-    sort_partition_blocks(combined.partition);
-    return combined;
-}
-
 } // namespace
-
-std::optional<CutAwareCluster> find_cut_aware_cluster(const AnnotatedInstance &instance) {
-    validate_cut_aware_instance(instance);
-    if (instance.trees[0].leaves() < 4)
-        return std::nullopt;
-    return ClosureSearch(instance).best_cluster();
-}
-
-std::optional<CutAwareCluster> find_none_none_cut_aware_cluster(const AnnotatedInstance &instance) {
-    validate_cut_aware_instance(instance);
-    if (instance.trees[0].leaves() < 4)
-        return std::nullopt;
-    return ClosureSearch(instance).best_none_none_cluster();
-}
 
 std::optional<CutAwareReduction> apply_cut_aware_plan(
     const AnnotatedInstance &instance,

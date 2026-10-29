@@ -2,14 +2,7 @@
 
 #include <array>
 #include <cstdint>
-#include <optional>
 #include <vector>
-
-namespace maffe {
-
-struct AnnotatedInstance;
-
-} // namespace maffe
 
 namespace maffe::detail {
 
@@ -30,7 +23,5 @@ struct CutAwareCluster {
     std::vector<int> leaves;
     std::array<CutAwareRepresentation, 2> representation;
 };
-
-[[nodiscard]] std::optional<CutAwareCluster> find_cut_aware_cluster(const AnnotatedInstance& instance);
 
 } // namespace maffe::detail

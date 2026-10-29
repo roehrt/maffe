@@ -16,6 +16,7 @@
 #include "reductions/reductions.hpp"
 #include "newick/newick.hpp"
 #include "util/log.hpp"
+#include "util/tree_index.hpp"
 
 namespace maffe {
 namespace {
@@ -97,21 +98,13 @@ Tree annotate_tree(const newick::Tree& input, const std::unordered_map<std::stri
 
 class RestrictionBuilder {
 public:
-    RestrictionBuilder(const newick::Tree& source_tree, const std::vector<std::string>& leaf_names)
-        : source(source_tree) {
-        const int nodes = static_cast<int>(source.nodes.size());
-        if (source.root < 0 || source.root >= nodes)
-            throw std::invalid_argument("invalid source tree");
-
-        int levels = 1;
-        while ((1 << levels) <= std::max(nodes, 1))
-            ++levels;
-
-        tin.resize(nodes, -1);
-        tout.resize(nodes, -1);
-        up.assign(levels, std::vector<int>(nodes, 0));
-        leaf_node.reserve(leaf_names.size());
-        build_index(source.root, -1);
+    explicit RestrictionBuilder(const newick::Tree& source_tree)
+        : source(source_tree), index(parents(source_tree)) {
+        for (int node = 0; node < static_cast<int>(source.nodes.size()); ++node) {
+            const auto& [children, label] = source.nodes[node];
+            if (children.empty() && !leaf_node.emplace(label, node).second)
+                throw std::invalid_argument("duplicate leaf label");
+        }
     }
 
     [[nodiscard]] std::string restrict_block(const std::vector<std::string>& leaves) const {
@@ -127,84 +120,26 @@ public:
             selected.push_back(it->second);
         }
 
-        std::ranges::sort(selected, {}, [&](const int node) { return tin[node]; });
-        selected.erase(std::unique(selected.begin(), selected.end()), selected.end());
-        if (selected.empty())
-            throw std::invalid_argument("subtree selection is empty");
-        if (selected.size() == 1)
-            return source.nodes[selected.front()].label + ";";
-
-        std::vector<int> virtual_nodes = selected;
-        virtual_nodes.reserve(selected.size() * 2);
-        for (int i = 1; i < static_cast<int>(selected.size()); ++i)
-            virtual_nodes.push_back(lca(selected[i - 1], selected[i]));
-
-        std::ranges::sort(virtual_nodes, {}, [&](const int node) { return tin[node]; });
-        virtual_nodes.erase(std::unique(virtual_nodes.begin(), virtual_nodes.end()), virtual_nodes.end());
-
-        std::unordered_map<int, int> local;
-        local.reserve(virtual_nodes.size());
-        for (int i = 0; i < static_cast<int>(virtual_nodes.size()); ++i)
-            local.emplace(virtual_nodes[i], i);
-
-        std::vector<std::vector<int>> children(virtual_nodes.size());
-        std::vector<int> stack;
-        stack.reserve(virtual_nodes.size());
-        stack.push_back(virtual_nodes.front());
-        for (int i = 1; i < static_cast<int>(virtual_nodes.size()); ++i) {
-            const int node = virtual_nodes[i];
-            while (stack.size() >= 2 && !is_ancestor(stack.back(), node)) {
-                const int child = stack.back();
-                stack.pop_back();
-                children[local.at(stack.back())].push_back(local.at(child));
-            }
-            stack.push_back(node);
-        }
-        while (stack.size() > 1) {
-            const int child = stack.back();
-            stack.pop_back();
-            children[local.at(stack.back())].push_back(local.at(child));
-        }
-
-        return build_newick(local.at(stack.back()), virtual_nodes, children) + ";";
+        const auto tree = index.virtual_tree(selected);
+        std::vector<std::vector<int>> children(tree.nodes.size());
+        for (int i = 1; i < static_cast<int>(tree.nodes.size()); ++i)
+            children[tree.parent[i]].push_back(i);
+        return build_newick(0, tree.nodes, children) + ";";
     }
 
 private:
-    void build_index(const int node, const int parent) {
-        tin[node] = timer++;
-        up[0][node] = parent < 0 ? node : parent;
-        for (int level = 1; level < static_cast<int>(up.size()); ++level)
-            up[level][node] = up[level - 1][up[level - 1][node]];
-
-        const auto& [children, label] = source.nodes[node];
-        if (children.empty()) {
-            if (!leaf_node.emplace(label, node).second)
-                throw std::invalid_argument("duplicate leaf label");
-        } else {
-            if (children.size() != 2)
+    [[nodiscard]] static std::vector<int> parents(const newick::Tree& tree) {
+        if (tree.root < 0 || tree.root >= static_cast<int>(tree.nodes.size()))
+            throw std::invalid_argument("invalid source tree");
+        std::vector<int> parent(tree.nodes.size(), -1);
+        for (int node = 0; node < static_cast<int>(tree.nodes.size()); ++node) {
+            const auto& children = tree.nodes[node].children;
+            if (!children.empty() && children.size() != 2)
                 throw std::invalid_argument("input trees must be rooted and binary");
-            build_index(children[0], node);
-            build_index(children[1], node);
+            for (const int child : children)
+                parent[child] = node;
         }
-
-        tout[node] = timer;
-    }
-
-    [[nodiscard]] bool is_ancestor(const int ancestor, const int node) const {
-        return tin[ancestor] <= tin[node] && tout[node] <= tout[ancestor];
-    }
-
-    [[nodiscard]] int lca(int a, const int b) const {
-        if (is_ancestor(a, b))
-            return a;
-        if (is_ancestor(b, a))
-            return b;
-        for (int level = static_cast<int>(up.size()) - 1; level >= 0; --level) {
-            const int parent = up[level][a];
-            if (!is_ancestor(parent, b))
-                a = parent;
-        }
-        return up[0][a];
+        return parent;
     }
 
     [[nodiscard]] std::string build_newick(
@@ -223,10 +158,7 @@ private:
 
     const newick::Tree& source;
     std::unordered_map<std::string, int> leaf_node;
-    std::vector<int> tin;
-    std::vector<int> tout;
-    std::vector<std::vector<int>> up;
-    int timer = 0;
+    detail::TreeIndex index;
 };
 
 ParsedTrees parse_trees(const std::vector<std::string>& input) {
@@ -329,7 +261,7 @@ std::vector<std::vector<std::string>> solve(const std::vector<std::string>& tree
 
 std::string restrict(const std::vector<std::string>& trees, const std::vector<std::string>& leaves) {
     const ParsedTrees parsed = parse_trees(trees);
-    return RestrictionBuilder(parsed.trees.front(), parsed.leaf_names).restrict_block(leaves);
+    return RestrictionBuilder(parsed.trees.front()).restrict_block(leaves);
 }
 
 std::vector<std::string> restrict(
@@ -337,7 +269,7 @@ std::vector<std::string> restrict(
     const std::vector<std::vector<std::string>>& partition
 ) {
     const ParsedTrees parsed = parse_trees(trees);
-    RestrictionBuilder builder(parsed.trees.front(), parsed.leaf_names);
+    RestrictionBuilder builder(parsed.trees.front());
     std::vector<std::string> output;
     output.reserve(partition.size());
     for (const auto& leaves : partition)

@@ -278,7 +278,6 @@ std::optional<Reduced> try_cherry_picking(const AnnotatedInstance& instance) {
                         const auto& part = expanded[chosen[leaf]];
                         out.insert(out.end(), part.begin(), part.end());
                     }
-                    std::ranges::sort(out);
                 }
                 detail::sort_partition_blocks(lifted.partition);
                 return lifted;

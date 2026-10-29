@@ -51,7 +51,7 @@ struct Triple {
     return std::nullopt;
 }
 
-[[nodiscard]] std::vector<Triple> triples_at(
+[[nodiscard]] std::optional<Triple> triple_at(
     const Tree& tree,
     const std::span<const std::array<int, 2>> children,
     const int node
@@ -59,20 +59,15 @@ struct Triple {
     if (node < tree.leaves())
         return {};
 
-    const auto [left, right] = children[node];
-    std::vector<Triple> triples;
-    const auto collect = [&](const int pair, const int c) {
-        if (!is_leaf(tree, c) || pair < tree.leaves())
-            return;
-        const auto [a, b] = children[pair];
-        if (!is_leaf(tree, a) || !is_leaf(tree, b))
-            return;
-        triples.push_back(Triple{.a = a, .b = b, .c = c});
-        triples.push_back(Triple{.a = b, .b = a, .c = c});
-    };
-    collect(left, right);
-    collect(right, left);
-    return triples;
+    auto [pair, c] = children[node];
+    if (is_leaf(tree, pair))
+        std::swap(pair, c);
+    if (!is_leaf(tree, c) || pair < tree.leaves())
+        return std::nullopt;
+    const auto [a, b] = children[pair];
+    if (!is_leaf(tree, a) || !is_leaf(tree, b))
+        return std::nullopt;
+    return Triple{.a = a, .b = b, .c = c};
 }
 
 [[nodiscard]] std::optional<std::array<int, 2>> paired_hanging_subtrees(
@@ -102,7 +97,7 @@ struct Triple {
     return std::nullopt;
 }
 
-[[nodiscard]] std::vector<FiveThreeCandidate> find_five_three_candidates(const AnnotatedInstance& instance) {
+[[nodiscard]] std::optional<FiveThreeCandidate> find_best_five_three_candidate(const AnnotatedInstance& instance) {
     if (!valid_tree_count(instance))
         return {};
 
@@ -115,38 +110,33 @@ struct Triple {
         detail::subtree_leaf_counts(instance.trees[1], children[1]),
     };
 
-    std::vector<FiveThreeCandidate> candidates;
+    std::optional<FiveThreeCandidate> best;
     for (int triple_tree = 0; triple_tree < 2; ++triple_tree) {
         const int cut_tree = triple_tree ^ 1;
         for (int node = instance.trees[triple_tree].leaves(); node < instance.trees[triple_tree].vertices(); ++node) {
-            for (const Triple triple : triples_at(instance.trees[triple_tree], children[triple_tree], node)) {
+            const auto found = triple_at(instance.trees[triple_tree], children[triple_tree], node);
+            if (!found)
+                continue;
+            for (const Triple triple : {*found, Triple{found->b, found->a, found->c}}) {
                 auto cuts = paired_hanging_subtrees(instance.trees[cut_tree], children[cut_tree], triple);
                 if (!cuts)
                     continue;
                 std::ranges::sort(*cuts);
-                candidates.push_back(FiveThreeCandidate{
+                const FiveThreeCandidate candidate{
                     .cut_tree = cut_tree,
                     .a = triple.a,
                     .b = triple.b,
                     .c = triple.c,
                     .cut_edges = *cuts,
                     .subtree = subtree[cut_tree][(*cuts)[0]] + subtree[cut_tree][(*cuts)[1]],
-                });
+                };
+                if (!best || std::tie(best->subtree, best->cut_tree, best->cut_edges, best->a, best->b, best->c) <
+                    std::tie(candidate.subtree, candidate.cut_tree, candidate.cut_edges, candidate.a, candidate.b, candidate.c))
+                    best = candidate;
             }
         }
     }
-    return candidates;
-}
-
-[[nodiscard]] std::optional<FiveThreeCandidate> find_best_five_three_candidate(const AnnotatedInstance& instance) {
-    const auto candidates = find_five_three_candidates(instance);
-    if (candidates.empty())
-        return std::nullopt;
-
-    return *std::max_element(candidates.begin(), candidates.end(), [](const auto& lhs, const auto& rhs) {
-        return std::tuple(lhs.subtree, lhs.cut_tree, lhs.cut_edges, lhs.a, lhs.b, lhs.c) <
-            std::tuple(rhs.subtree, rhs.cut_tree, rhs.cut_edges, rhs.a, rhs.b, rhs.c);
-    });
+    return best;
 }
 
 } // namespace

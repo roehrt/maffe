@@ -184,15 +184,7 @@ void require_common_leaf_count(const AnnotatedInstance& instance, const std::str
 }
 
 [[nodiscard]] Result singleton_result(const AnnotatedInstance& instance) {
-    Result result;
-    result.feasible = true;
-    if (instance.trees.empty())
-        return result;
-    const int leaves = instance.trees.front().leaves();
-    result.partition.reserve(leaves);
-    for (int leaf = 0; leaf < leaves; ++leaf)
-        result.partition.push_back({leaf});
-    return result;
+    return detail::singleton_result(instance.trees.empty() ? 0 : instance.trees.front().leaves());
 }
 
 [[nodiscard]] bool should_use_compact_lp(const AnnotatedInstance& instance) {

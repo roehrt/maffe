@@ -16,18 +16,12 @@ namespace maffe::scip_error_log {
 template <class... Ts>
 constexpr void ignore_unused(const Ts&...) noexcept {}
 
-inline void log_prefixed_lines(const std::string_view prefix, const char* const msg) {
-    if (msg == nullptr)
-        return;
-
-    std::string_view remaining(msg);
+inline void log_prefixed_lines(const std::string_view prefix, std::string_view remaining) {
     while (!remaining.empty()) {
         const std::size_t newline = remaining.find_first_of("\r\n");
         std::string_view line = newline == std::string_view::npos
             ? remaining
             : remaining.substr(0, newline);
-        while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
-            line.remove_suffix(1);
         if (!line.empty())
             logging::line(prefix, line);
         if (newline == std::string_view::npos)
@@ -36,6 +30,11 @@ inline void log_prefixed_lines(const std::string_view prefix, const char* const 
         while (!remaining.empty() && (remaining.front() == '\n' || remaining.front() == '\r'))
             remaining.remove_prefix(1);
     }
+}
+
+inline void log_prefixed_lines(const std::string_view prefix, const char* const msg) {
+    if (msg != nullptr)
+        log_prefixed_lines(prefix, std::string_view(msg));
 }
 
 [[nodiscard]] inline std::string_view status_name(const SCIP_STATUS status) {

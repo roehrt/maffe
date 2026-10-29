@@ -254,6 +254,21 @@ if competition
     )
   endforeach
 else
+  test('set-packing', executable(
+    'test-set-packing',
+    'tests/set_packing.cpp',
+    'src/branchandprice/master/set_packing_heuristic.cpp',
+    include_directories: include_dirs,
+    build_by_default: false,
+  ))
+  test('tree-index', executable(
+    'test-tree-index',
+    'tests/tree_index.cpp',
+    'src/branchandprice/master/root_master.cpp',
+    'src/heuristic/node_coverage.cpp',
+    include_directories: include_dirs,
+    build_by_default: false,
+  ))
   if get_option('cli')
     executable(
       'maffe-unrooted',

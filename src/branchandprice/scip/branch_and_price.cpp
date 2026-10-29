@@ -5,6 +5,7 @@
 #include "branchandprice/master/set_packing_scip.hpp"
 #include "branchandprice/pricer/lagrangian.hpp"
 #include "util/hash.hpp"
+#include "util/partition_ops.hpp"
 #include "util/log.hpp"
 #include "util/constants.hpp"
 #include "util/tree_ops.hpp"
@@ -75,6 +76,8 @@
 #undef SCIP_PricerData
 #undef SCIP_EventhdlrData
 #undef SCIP_BranchruleData
+
+#include "util/scip_utils.hpp"
 
 namespace maffe {
 
@@ -258,16 +261,6 @@ using scip_error_log::status_name;
 }
 
 SCIP_DECL_MESSAGEWARNING(scip_message_warning) {
-    ignore_unused(messagehdlr, file);
-    scip_error_log::log_prefixed_lines("scip: ", msg);
-}
-
-SCIP_DECL_MESSAGEDIALOG(scip_message_dialog) {
-    ignore_unused(messagehdlr, file);
-    scip_error_log::log_prefixed_lines("scip: ", msg);
-}
-
-SCIP_DECL_MESSAGEINFO(scip_message_info) {
     ignore_unused(messagehdlr, file);
     scip_error_log::log_prefixed_lines("scip: ", msg);
 }
@@ -476,10 +469,8 @@ void interrupt_if_acceptance_rule_satisfied(SCIP* scip, BranchAndPriceData& data
             }
         }
         return column;
-    } catch (const std::invalid_argument& ex) {
-        if (std::string_view(ex.what()) == "column leaf set is disconnected by cuts")
-            return std::nullopt;
-        throw;
+    } catch (const DisconnectedColumn&) {
+        return std::nullopt;
     }
 }
 
@@ -1288,7 +1279,7 @@ void refresh_rc_flat_duals(
         auto column = try_build_compatible_column(data.instance, data.layout, block, context.edge_states);
         if (!column.has_value())
             continue;
-        double reduced_cost = root_master_reduced_cost(data.layout, *column, context.rc_flat_duals);
+        double reduced_cost = root_master_reduced_cost(*column, context.rc_flat_duals);
         for (int tree = 0; tree < static_cast<int>(column->used_edges.size()); ++tree) {
             for (const int edge : column->used_edges[tree])
                 reduced_cost -= context.edge_duals[tree][edge];
@@ -2373,38 +2364,11 @@ Result solve_with_scip_branch_and_price(
     if (initial_column_sets.empty()) {
         if (generated_columns != nullptr)
             generated_columns->clear();
-        Result result;
-        result.feasible = true;
-        if (!instance.trees.empty()) {
-            result.partition.reserve(instance.trees.front().leaves());
-            for (int leaf = 0; leaf < instance.trees.front().leaves(); ++leaf)
-                result.partition.push_back({leaf});
-        }
-        return result;
+        return detail::singleton_result(instance.trees.empty() ? 0 : instance.trees.front().leaves());
     }
 
-    SCIP* raw_scip = nullptr;
-    check(SCIPcreate(&raw_scip));
-    const auto free_scip = [](SCIP* scip) {
-        if (scip != nullptr)
-            ignore_unused(SCIPfree(&scip));
-    };
-    std::unique_ptr<SCIP, decltype(free_scip)> scip(raw_scip, free_scip);
-
-    SCIP_MESSAGEHDLR* raw_messagehdlr = nullptr;
-    check(SCIPmessagehdlrCreate(
-        &raw_messagehdlr,
-        TRUE,
-        nullptr,
-        !logging::enabled(log_level),
-        scip_message_warning,
-        scip_message_dialog,
-        scip_message_info,
-        nullptr,
-        nullptr
-    ));
-    check(SCIPsetMessagehdlr(scip.get(), raw_messagehdlr));
-    check(SCIPmessagehdlrRelease(&raw_messagehdlr));
+    auto scip = scip_utils::create();
+    scip_utils::install_message_handler(scip.get(), logging::enabled(log_level), scip_message_warning);
 
     check(SCIPincludeDefaultPlugins(scip.get()));
     check(SCIPsetBoolParam(scip.get(), "misc/catchctrlc", FALSE));
@@ -2444,9 +2408,9 @@ Result solve_with_scip_branch_and_price(
     data->subtree_leaf_count.resize(instance.trees.size());
     data->edge_depth.resize(instance.trees.size());
     data->edge_pseudocost.resize(instance.trees.size());
-    for (int tree = 0; tree < static_cast<int>(instance.trees.size()); ++tree)
-        data->subtree_leaf_count[tree] = detail::subtree_leaf_counts(instance.trees[tree], data->layout.children[tree]);
     for (int tree = 0; tree < static_cast<int>(instance.trees.size()); ++tree) {
+        const auto children = detail::tree_children(instance.trees[tree]);
+        data->subtree_leaf_count[tree] = detail::subtree_leaf_counts(instance.trees[tree], children);
         data->edge_depth[tree].assign(instance.trees[tree].vertices(), 0);
         std::vector<int> stack;
         stack.reserve(instance.trees[tree].vertices());
@@ -2457,7 +2421,7 @@ Result solve_with_scip_branch_and_price(
         while (!stack.empty()) {
             const int u = stack.back();
             stack.pop_back();
-            const auto [left, right] = data->layout.children[tree][u];
+            const auto [left, right] = children[u];
             if (left >= 0) {
                 data->edge_depth[tree][left] = data->edge_depth[tree][u] + 1;
                 stack.push_back(left);

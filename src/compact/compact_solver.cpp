@@ -53,6 +53,8 @@
 #undef SCIP_ConsData
 #undef SCIP_SepaData
 
+#include "util/scip_utils.hpp"
+
 #include "util/log.hpp"
 #include "util/partition_ops.hpp"
 #include "util/scip_error_log.hpp"
@@ -138,26 +140,7 @@ void apply_compact_scip_settings(SCIP* scip, const LogLevel log_level) {
     check(SCIPsetIntParam(scip, "separating/maxcutsroot", constants::compact_scip_max_cuts_root));
 }
 
-[[nodiscard]] Result singleton_result(const int leaves) {
-    Result result;
-    result.feasible = true;
-    result.partition.reserve(leaves);
-    for (int leaf = 0; leaf < leaves; ++leaf)
-        result.partition.push_back({leaf});
-    return result;
-}
-
 SCIP_DECL_MESSAGEWARNING(scip_message_warning) {
-    ignore_unused(messagehdlr, file);
-    scip_error_log::log_prefixed_lines("compact-scip: ", msg);
-}
-
-SCIP_DECL_MESSAGEDIALOG(scip_message_dialog) {
-    ignore_unused(messagehdlr, file);
-    scip_error_log::log_prefixed_lines("compact-scip: ", msg);
-}
-
-SCIP_DECL_MESSAGEINFO(scip_message_info) {
     ignore_unused(messagehdlr, file);
     scip_error_log::log_prefixed_lines("compact-scip: ", msg);
 }
@@ -3182,28 +3165,8 @@ Result solve_with_compact_lp_impl(
     if (logging::enabled(log_level, LogLevel::VERBOSE))
         log_compact_size_analysis(build_log_prefix, prepared);
 
-    SCIP* raw_scip = nullptr;
-    check(SCIPcreate(&raw_scip));
-    const auto free_scip = [](SCIP* scip) {
-        if (scip != nullptr)
-            ignore_unused(SCIPfree(&scip));
-    };
-    std::unique_ptr<SCIP, decltype(free_scip)> scip(raw_scip, free_scip);
-
-    SCIP_MESSAGEHDLR* raw_messagehdlr = nullptr;
-    check(SCIPmessagehdlrCreate(
-        &raw_messagehdlr,
-        TRUE,
-        nullptr,
-        !logging::enabled(log_level),
-        scip_message_warning,
-        scip_message_dialog,
-        scip_message_info,
-        nullptr,
-        nullptr
-    ));
-    check(SCIPsetMessagehdlr(scip.get(), raw_messagehdlr));
-    check(SCIPmessagehdlrRelease(&raw_messagehdlr));
+    auto scip = scip_utils::create();
+    scip_utils::install_message_handler(scip.get(), logging::enabled(log_level), scip_message_warning);
 
     check(SCIPincludeDefaultPlugins(scip.get()));
     apply_compact_scip_settings(scip.get(), log_level);
@@ -3212,7 +3175,7 @@ Result solve_with_compact_lp_impl(
     check(SCIPaddOrigObjoffset(scip.get(), prepared.model.objective_offset + static_cast<double>(objective_offset)));
     check(SCIPsetObjIntegral(scip.get()));
     if (const auto remaining = remaining_seconds(deadline); remaining.has_value() && *remaining <= 0.0)
-        return allow_abort_with_incumbent ? singleton_result(instance.trees.front().leaves()) : Result{};
+        return allow_abort_with_incumbent ? detail::singleton_result(instance.trees.front().leaves()) : Result{};
     apply_scip_time_limit(scip.get(), deadline);
 
     ScipModel scip_model = pass_model_to_scip(scip.get(), prepared.model, prepared.trees, prepared.states);
@@ -3292,7 +3255,7 @@ Result solve_with_compact_lp_impl(
 
     const auto solve_start = std::chrono::steady_clock::now();
     if (const auto remaining = remaining_seconds(deadline); remaining.has_value() && *remaining <= 0.0)
-        return allow_abort_with_incumbent ? singleton_result(instance.trees.front().leaves()) : Result{};
+        return allow_abort_with_incumbent ? detail::singleton_result(instance.trees.front().leaves()) : Result{};
     apply_scip_time_limit(scip.get(), deadline);
     check(SCIPsolve(scip.get()));
     const auto solved = std::chrono::steady_clock::now();
@@ -3374,7 +3337,7 @@ Result solve_with_compact_gurobi(
         log_compact_size_analysis("compact-gurobi", prepared);
 
     if (const auto remaining = remaining_seconds(deadline); remaining.has_value() && *remaining <= 0.0)
-        return allow_abort_with_incumbent ? singleton_result(instance.trees.front().leaves()) : Result{};
+        return allow_abort_with_incumbent ? detail::singleton_result(instance.trees.front().leaves()) : Result{};
 
     CompactRootLpSeed root_lp_seed = build_compact_root_lp_seed(prepared, objective_offset, deadline);
     const bool root_lp_incumbent_installed = root_lp_seed.start_values.has_value();
@@ -3605,7 +3568,7 @@ Result solve_with_compact_gurobi(
 
     const auto solve_start = std::chrono::steady_clock::now();
     if (const auto remaining = remaining_seconds(deadline); remaining.has_value() && *remaining <= 0.0)
-        return allow_abort_with_incumbent ? singleton_result(instance.trees.front().leaves()) : Result{};
+        return allow_abort_with_incumbent ? detail::singleton_result(instance.trees.front().leaves()) : Result{};
     apply_gurobi_time_limit(model.get(), deadline);
     check_gurobi(env.get(), GRBoptimize(model.get()));
     const auto solved = std::chrono::steady_clock::now();

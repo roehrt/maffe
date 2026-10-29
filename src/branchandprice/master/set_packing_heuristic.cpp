@@ -1,3 +1,4 @@
+#include "branchandprice/master/set_packing_validation.hpp"
 #include "branchandprice/master/set_packing_heuristic.hpp"
 
 #include "util/constants.hpp"
@@ -112,42 +113,6 @@ struct PairBucket {
            !sorted_ranges_intersect(a.row_indices, b.row_indices);
 }
 
-void validate_column(
-    const RootSetPackingColumnView& column,
-    const int leaf_count,
-    const int row_count,
-    const int forced_row_count,
-    const int column_count
-) {
-    if (column.column_id < 0 || column.column_id >= column_count)
-        throw std::invalid_argument("set packing column id out of range");
-    int previous_leaf = -1;
-    for (const int leaf : column.leaves) {
-        if (leaf < 0 || leaf >= leaf_count)
-            throw std::invalid_argument("set packing column leaf out of range");
-        if (leaf <= previous_leaf)
-            throw std::invalid_argument("set packing column leaves must be sorted and unique");
-        previous_leaf = leaf;
-    }
-    int previous_row = -1;
-    for (const int row : column.row_indices) {
-        if (row < 0 || row >= row_count)
-            throw std::invalid_argument("set packing column row out of range");
-        if (row <= previous_row)
-            throw std::invalid_argument("set packing column rows must be sorted and unique");
-        previous_row = row;
-    }
-
-    int previous_forced_row = -1;
-    for (const int row : column.forced_rows) {
-        if (row < 0 || row >= forced_row_count)
-            throw std::invalid_argument("set packing column forced row out of range");
-        if (row <= previous_forced_row)
-            throw std::invalid_argument("set packing column forced rows must be sorted and unique");
-        previous_forced_row = row;
-    }
-}
-
 [[nodiscard]] std::vector<Candidate> build_candidates(
     const int leaf_count,
     const int row_count,
@@ -160,7 +125,7 @@ void validate_column(
 
     for (int i = 0; i < static_cast<int>(columns.size()); ++i) {
         const RootSetPackingColumnView& column = columns[i];
-        validate_column(column, leaf_count, row_count, forced_row_count, column_count);
+        detail::validate_packing_column(column, leaf_count, row_count, forced_row_count, column_count);
         if (column.leaves.size() < 2)
             continue;
         const double lp_value = std::clamp(column.lp_value, 0.0, 1.0);
@@ -207,7 +172,6 @@ void validate_column(
         candidate.score = candidate.base_score / (1.0 + std::sqrt(average_pressure));
     }
 
-    std::ranges::sort(candidates, better_candidate);
     return candidates;
 }
 

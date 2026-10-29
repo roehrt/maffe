@@ -14,6 +14,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -49,22 +50,13 @@ using Clock = std::chrono::steady_clock;
     return std::min(std::max(0.0, planned_seconds), remaining_seconds(deadline));
 }
 
-[[nodiscard]] Result singleton_result(const int leaves) {
-    Result result;
-    result.feasible = true;
-    result.partition.reserve(leaves);
-    for (int leaf = 0; leaf < leaves; ++leaf)
-        result.partition.push_back({leaf});
-    return result;
-}
-
 [[nodiscard]] Result initial_or_singleton(const AnnotatedInstance& instance, const Result* initial_solution) {
     if (initial_solution != nullptr && initial_solution->feasible && !initial_solution->partition.empty()) {
         Result result = *initial_solution;
         detail::sort_partition_blocks(result.partition);
         return result;
     }
-    return singleton_result(instance.trees.front().leaves());
+    return detail::singleton_result(instance.trees.front().leaves());
 }
 
 void add_column(std::map<std::vector<int>, int>& column_pool, std::vector<int> block, const int weight = 1) {
@@ -147,7 +139,8 @@ public:
           dual_count_(instance.trees[1].vertices() - instance.trees[1].leaves()),
           column_pool_(column_pool),
           pricer_(pricer),
-          stats_(stats) {}
+          stats_(stats),
+          coverage_(instance.trees[1]) {}
 
     int evaluate(
         const double* dual,
@@ -183,7 +176,7 @@ public:
             add_column(column_pool_, std::move(block));
 
         std::vector<int> cover(instance_.trees[1].vertices(), 0);
-        compute_node_coverage(instance_.trees[1], priced.leaf_partition, cover);
+        coverage_.compute(priced.leaf_partition, cover);
 
         ConicBundle::DVector subgradient(dual_count_, 0.0);
         for (int i = 0; i < dual_count_; ++i)
@@ -200,6 +193,7 @@ private:
     std::map<std::vector<int>, int>& column_pool_;
     Lagrangian& pricer_;
     ConicBundleStats& stats_;
+    NodeCoverage coverage_;
 };
 #endif
 
@@ -421,26 +415,20 @@ void evaluate_perturbed_duals(
     const std::vector<std::vector<int>>& candidates,
     std::vector<std::vector<int>>& column_rows
 ) {
-    int row = 0;
-    std::vector<std::vector<int>> vertex_to_row(2);
-    for (int tree = 0; tree < 2; ++tree) {
-        vertex_to_row[tree].resize(instance.trees[tree].vertices(), -1);
-        for (int vertex = instance.trees[tree].leaves(); vertex < instance.trees[tree].vertices(); ++vertex)
-            vertex_to_row[tree][vertex] = row++;
-    }
-
+    const int second_tree_offset = instance.trees[0].vertices() - instance.trees[0].leaves();
+    const std::array coverage = {NodeCoverage(instance.trees[0]), NodeCoverage(instance.trees[1])};
+    std::vector<int> cover;
     column_rows.clear();
     column_rows.resize(candidates.size());
     std::vector<RootSetPackingColumnView> views;
     views.reserve(candidates.size());
     for (int column = 0; column < static_cast<int>(candidates.size()); ++column) {
-        const std::vector<std::vector<int>> single_component = {candidates[column]};
+        const std::span single_component(&candidates[column], 1);
         for (int tree = 0; tree < 2; ++tree) {
-            std::vector<int> cover(instance.trees[tree].vertices(), 0);
-            compute_node_coverage(instance.trees[tree], single_component, cover);
+            coverage[tree].compute(single_component, cover);
             for (int vertex = instance.trees[tree].leaves(); vertex < instance.trees[tree].vertices(); ++vertex) {
                 if (cover[vertex] > 0)
-                    column_rows[column].push_back(vertex_to_row[tree][vertex]);
+                    column_rows[column].push_back((tree == 0 ? 0 : second_tree_offset) + vertex - instance.trees[tree].leaves());
             }
         }
         views.push_back(RootSetPackingColumnView{

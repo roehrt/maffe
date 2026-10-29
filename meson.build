@@ -2,7 +2,7 @@ project(
   'maffe',
   'cpp',
   meson_version: '>= 1.3.0',
-  version: '0.1',
+  version: '0.1.1',
   license: 'MIT',
   default_options: ['warning_level=3', 'cpp_std=c++23', 'b_lto=true'],
 )
@@ -37,6 +37,7 @@ highs_options.add_cmake_defines(
     'BUILD_CXX_EXE': 'OFF',
     'BUILD_EXAMPLES': 'OFF',
     'BUILD_TESTING': 'OFF',
+    'CMAKE_POSITION_INDEPENDENT_CODE': 'ON',
     'ZLIB': 'OFF',
   },
 )
@@ -96,7 +97,7 @@ scip_cmake_defines = {
   'NO_EXTERNAL_CODE': 'on',
   'PAPILO': 'off',
   'READLINE': 'off',
-  'SOPLEX': 'on',
+  'SOPLEX': competition ? 'on' : 'off',
   'SHARED': 'off',
   'SYM': 'none',
   'THREADSAFE': 'off',
@@ -122,13 +123,13 @@ scip_options.add_cmake_defines(scip_cmake_defines)
 
 scipoptsuite_project = cmake.subproject('scipoptsuite', options: scip_options)
 scip_dep = scipoptsuite_project.dependency('libscip')
-soplex_dep = scipoptsuite_project.dependency('libsoplex')
-
 dependencies = [
   scip_dep,
-  soplex_dep,
   highs_dep,
 ] + gurobi_deps + conicbundle_deps
+if competition
+  dependencies += [scipoptsuite_project.dependency('libsoplex')]
+endif
 
 git_prog = find_program('git', required: false)
 git_hash = 'unknown'
@@ -180,6 +181,7 @@ core_sources = [
   'src/branchandprice/master/set_packing_heuristic.cpp',
   'src/branchandprice/master/set_packing_scip.cpp',
   'src/compact/compact_solver.cpp',
+  'src/compact/unrooted_solver.cpp',
   'src/heuristic/colgen_heuristic.cpp',
   'src/heuristic/node_coverage.cpp',
   'src/maffe/maffe.cpp',
@@ -192,6 +194,7 @@ core_sources = [
   'src/reductions/orchestrator.cpp',
   'src/reductions/three_two_reduction.cpp',
   'src/newick/newick.cpp',
+  'src/util/scip_error_log.cpp',
 ]
 
 include_dirs = include_directories('.', 'include', 'src')
@@ -251,22 +254,53 @@ if competition
     )
   endforeach
 else
-  executable(
-    'maffe',
-    cli_sources,
+  test('set-packing', executable(
+    'test-set-packing',
+    'tests/set_packing.cpp',
+    'src/branchandprice/master/set_packing_heuristic.cpp',
     include_directories: include_dirs,
-    dependencies: dependencies,
-    link_with: core_lib,
-    link_args: cli_link_args,
-    install: true,
-  )
+    build_by_default: false,
+  ))
+  test('tree-index', executable(
+    'test-tree-index',
+    'tests/tree_index.cpp',
+    'src/branchandprice/master/root_master.cpp',
+    'src/heuristic/node_coverage.cpp',
+    include_directories: include_dirs,
+    build_by_default: false,
+  ))
+  if get_option('cli')
+    executable(
+      'maffe-unrooted',
+      'src/cli/unrooted_main.cpp',
+      include_directories: include_dirs,
+      dependencies: dependencies,
+      link_with: core_lib,
+      install: true,
+    )
+    executable(
+      'maffe',
+      cli_sources,
+      include_directories: include_dirs,
+      dependencies: dependencies,
+      link_with: core_lib,
+      link_args: cli_link_args,
+      install: true,
+    )
+  endif
   if python_enabled
+    python_link_args = []
+    if host_machine.system() == 'windows' and cpp.get_id() == 'gcc'
+      # Keep the GCC runtimes part of the extension rather than ship standalone DLLs.
+      python_link_args += ['-static-libgcc', '-static-libstdc++']
+    endif
     py.extension_module(
       'maffe',
       'bindings/python/module.cpp',
       include_directories: include_dirs,
       dependencies: dependencies + [py_dep, pybind11_dep],
       link_with: core_lib,
+      link_args: python_link_args,
       install: true,
     )
   endif

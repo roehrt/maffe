@@ -1,29 +1,23 @@
 #pragma once
 
 #include "maffe/common.hpp"
+#include "util/tree_index.hpp"
 
-#include <array>
 #include <span>
-#include <utility>
+#include <stdexcept>
 #include <vector>
 
 namespace maffe {
 
+struct DisconnectedColumn : std::invalid_argument {
+    DisconnectedColumn() : std::invalid_argument("column leaf set is disconnected by cuts") {}
+};
+
 struct RootMasterLayout {
     int leaf_count = 0;
-    int vertex_row_count = 0;
     int row_count = 0;
     std::vector<std::vector<int>> row_of_vertex;
-    std::vector<std::vector<std::array<int, 2>>> children;
-    struct TreeIndex {
-        std::vector<int> parent;
-        std::vector<int> tin;
-        std::vector<int> tout;
-        std::vector<int> depth;
-        std::vector<int> component;
-        std::vector<std::vector<int>> up;
-    };
-    std::vector<TreeIndex> tree_index;
+    std::vector<detail::TreeIndex> tree_index;
 };
 
 struct RootMasterColumn {
@@ -41,7 +35,6 @@ RootMasterColumn build_root_master_column(
     std::span<const int> leaves
 );
 double root_master_reduced_cost(
-    const RootMasterLayout& layout,
     const RootMasterColumn& column,
     std::span<const double> flat_row_duals
 );

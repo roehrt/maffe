@@ -14,8 +14,8 @@ namespace maffe {
 namespace {
 
 struct ChainLiftData {
-    const std::vector<int>& kept_leaves;
-    const std::vector<int>& removed_leaves;
+    std::vector<int> kept_leaves;
+    std::vector<int> removed_leaves;
     int anchor_old_leaf = -1;
 };
 
@@ -52,9 +52,9 @@ struct ChainLiftData {
             continue;
 
         std::vector<int> chain{std::min(a, b), std::max(a, b)};
+        std::vector<int> next_spine(instance.trees.size());
         for (;;) {
             std::optional<int> next_leaf;
-            std::vector<int> next_spine(instance.trees.size());
             bool extend = true;
             for (int i = 0; i < static_cast<int>(instance.trees.size()); ++i) {
                 const int parent = instance.trees[i].parent[spine[i]];
@@ -79,10 +79,8 @@ struct ChainLiftData {
             }
             if (!extend)
                 break;
-            if (!next_leaf.has_value())
-                break;
-            chain.push_back(next_leaf.value());
-            spine = std::move(next_spine);
+            chain.push_back(*next_leaf);
+            spine.swap(next_spine);
         }
 
         if (chain.size() <= instance.trees.size() + 1)
@@ -108,10 +106,7 @@ struct ChainLiftData {
 
         if (std::ranges::find(block, chain.anchor_old_leaf) != block.end()) {
             block.insert(block.end(), chain.removed_leaves.begin(), chain.removed_leaves.end());
-            std::ranges::sort(block);
             inserted = true;
-        } else {
-            std::ranges::sort(block);
         }
     }
 
@@ -126,8 +121,7 @@ struct ChainLiftData {
 
 std::optional<Reduced> try_chain_rule(const AnnotatedInstance& instance) {
     AnnotatedInstance current = instance;
-    std::vector<Lift> lifts;
-    int reductions = 0;
+    std::vector<ChainLiftData> lifts;
 
     for (;;) {
         const auto chain = longest_common_chain(current);
@@ -155,26 +149,23 @@ std::optional<Reduced> try_chain_rule(const AnnotatedInstance& instance) {
             kept_leaves.push_back(leaf);
         }
 
-        const int anchor = (*chain)[keep - 1];
-        lifts.emplace_back([kept_leaves = std::move(kept_leaves), removed_leaves = std::move(removed_leaves), anchor](Result result) mutable {
-            return lift_chain(std::move(result), {
-                .kept_leaves = kept_leaves,
-                .removed_leaves = removed_leaves,
-                .anchor_old_leaf = anchor,
-            });
+        lifts.push_back({
+            .kept_leaves = std::move(kept_leaves),
+            .removed_leaves = std::move(removed_leaves),
+            .anchor_old_leaf = (*chain)[keep - 1],
         });
         current = detail::restrict_instance_by_leaf_map(current, leaf_map, "chain reduction removed all leaves");
-        ++reductions;
     }
 
-    if (reductions == 0)
+    if (lifts.empty())
         return std::nullopt;
 
+    const int reductions = static_cast<int>(lifts.size());
     return Reduced{
         .instance = std::move(current),
-        .lift = [lifts = std::move(lifts)](Result result) mutable {
-            for (int i = static_cast<int>(lifts.size()) - 1; i >= 0; --i)
-                result = lifts[i](std::move(result));
+        .lift = [lifts = std::move(lifts)](Result result) {
+            for (const auto& chain : lifts | std::views::reverse)
+                result = lift_chain(std::move(result), chain);
             return result;
         },
         .reduction_count = reductions,

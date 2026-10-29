@@ -8,6 +8,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace maffe::detail {
@@ -22,17 +23,11 @@ struct BinaryTreeView {
     const Tree& tree,
     const CutHandling cut_handling = CutHandling::EXCLUDE_CUT
 ) {
-    BinaryTreeView built{
+    return BinaryTreeView{
         .leaves = tree.leaves(),
         .parent = tree.parent,
         .child = tree_children(tree, cut_handling),
     };
-    for (int u = built.leaves; u < static_cast<int>(built.parent.size()); ++u) {
-        auto& [left, right] = built.child[u];
-        if (left >= 0 && right >= 0 && right < left)
-            std::swap(left, right);
-    }
-    return built;
 }
 
 [[nodiscard]] inline std::vector<BinaryTreeView> build_binary_tree_views(
@@ -46,10 +41,12 @@ struct BinaryTreeView {
     return trees;
 }
 
-[[nodiscard]] inline std::string induced_signature(const BinaryTreeView& tree, const std::vector<int>& leaves) {
-    if (leaves.empty())
-        return {};
+struct InducedSubtree {
+    std::vector<int> count;
+    int root;
+};
 
+[[nodiscard]] inline InducedSubtree induced_subtree(const BinaryTreeView& tree, const std::vector<int>& leaves) {
     std::vector<int> count(static_cast<int>(tree.parent.size()), 0);
     for (const int leaf : leaves)
         count[leaf] = 1;
@@ -61,6 +58,13 @@ struct BinaryTreeView {
     int root = leaves.front();
     while (root >= 0 && count[root] < static_cast<int>(leaves.size()))
         root = tree.parent[root];
+    return {std::move(count), root};
+}
+
+[[nodiscard]] inline std::string induced_signature(const BinaryTreeView& tree, const std::vector<int>& leaves) {
+    if (leaves.empty())
+        return {};
+    const auto [count, root] = induced_subtree(tree, leaves);
     if (root < 0)
         return "!";
 
@@ -91,17 +95,7 @@ struct BinaryTreeView {
     if (leaves.size() < 2)
         return {};
 
-    std::vector<int> count(static_cast<int>(tree.parent.size()), 0);
-    for (const int leaf : leaves)
-        count[leaf] = 1;
-    for (int u = tree.leaves; u < static_cast<int>(tree.parent.size()); ++u) {
-        const auto [left, right] = tree.child[u];
-        count[u] = (left >= 0 ? count[left] : 0) + (right >= 0 ? count[right] : 0);
-    }
-
-    int root = leaves.front();
-    while (root >= 0 && count[root] < static_cast<int>(leaves.size()))
-        root = tree.parent[root];
+    const auto [count, root] = induced_subtree(tree, leaves);
     if (root < 0)
         return {-1};
 

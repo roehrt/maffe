@@ -1,3 +1,4 @@
+#include "branchandprice/master/set_packing_validation.hpp"
 #include "branchandprice/master/set_packing_scip.hpp"
 
 #include "util/constants.hpp"
@@ -33,6 +34,8 @@
 #undef SCIP_ConsData
 #undef SCIP_EventhdlrData
 
+#include "util/scip_utils.hpp"
+
 namespace maffe {
 namespace {
 
@@ -51,20 +54,6 @@ void check_highs_run(const HighsStatus status) {
         throw std::runtime_error("HiGHS set packing solve failed");
 }
 
-void log_highs_lines(const std::string_view message) {
-    std::size_t begin = 0;
-    while (begin < message.size()) {
-        const std::size_t newline = message.find('\n', begin);
-        const std::size_t end = newline == std::string_view::npos ? message.size() : newline;
-        const std::size_t trimmed_end = end > begin && message[end - 1] == '\r' ? end - 1 : end;
-        if (trimmed_end > begin)
-            logging::line("set-packing-highs: ", message.substr(begin, trimmed_end - begin));
-        if (newline == std::string_view::npos)
-            break;
-        begin = newline + 1;
-    }
-}
-
 void highs_log_callback(
     const int callback_type,
     const std::string& message,
@@ -73,86 +62,14 @@ void highs_log_callback(
     void*
 ) {
     if (callback_type == kCallbackLogging)
-        log_highs_lines(message);
+        scip_error_log::log_prefixed_lines("set-packing-highs: ", message);
 }
-
-struct ScipDeleter {
-    void operator()(SCIP* scip) const noexcept {
-        if (scip != nullptr)
-            (void)SCIPfree(&scip);
-    }
-};
 
 using scip_error_log::ignore_unused;
 
 SCIP_DECL_MESSAGEWARNING(scip_message_warning) {
     ignore_unused(messagehdlr, file);
     scip_error_log::log_prefixed_lines("set-packing-scip: ", msg);
-}
-
-SCIP_DECL_MESSAGEDIALOG(scip_message_dialog) {
-    ignore_unused(messagehdlr, file);
-    scip_error_log::log_prefixed_lines("set-packing-scip: ", msg);
-}
-
-SCIP_DECL_MESSAGEINFO(scip_message_info) {
-    ignore_unused(messagehdlr, file);
-    scip_error_log::log_prefixed_lines("set-packing-scip: ", msg);
-}
-
-void install_message_handler(SCIP* scip, const bool enable_solver_output) {
-    SCIP_MESSAGEHDLR* raw_messagehdlr = nullptr;
-    check(SCIPmessagehdlrCreate(
-        &raw_messagehdlr,
-        TRUE,
-        nullptr,
-        !enable_solver_output,
-        scip_message_warning,
-        scip_message_dialog,
-        scip_message_info,
-        nullptr,
-        nullptr
-    ));
-    check(SCIPsetMessagehdlr(scip, raw_messagehdlr));
-    check(SCIPmessagehdlrRelease(&raw_messagehdlr));
-}
-
-void validate_column(
-    const RootSetPackingColumnView& column,
-    const int leaf_count,
-    const int row_count,
-    const int forced_row_count,
-    const int column_count
-) {
-    if (column.column_id < 0 || column.column_id >= column_count)
-        throw std::invalid_argument("SCIP set packing column id out of range");
-
-    int previous_leaf = -1;
-    for (const int leaf : column.leaves) {
-        if (leaf < 0 || leaf >= leaf_count)
-            throw std::invalid_argument("SCIP set packing column leaf out of range");
-        if (leaf <= previous_leaf)
-            throw std::invalid_argument("SCIP set packing column leaves must be sorted and unique");
-        previous_leaf = leaf;
-    }
-
-    int previous_row = -1;
-    for (const int row : column.row_indices) {
-        if (row < 0 || row >= row_count)
-            throw std::invalid_argument("SCIP set packing column row out of range");
-        if (row <= previous_row)
-            throw std::invalid_argument("SCIP set packing column rows must be sorted and unique");
-        previous_row = row;
-    }
-
-    int previous_forced_row = -1;
-    for (const int row : column.forced_rows) {
-        if (row < 0 || row >= forced_row_count)
-            throw std::invalid_argument("set packing column forced row out of range");
-        if (row <= previous_forced_row)
-            throw std::invalid_argument("set packing column forced rows must be sorted and unique");
-        previous_forced_row = row;
-    }
 }
 
 void apply_settings(
@@ -252,11 +169,9 @@ RootSetPackingSolution solve_root_set_packing_scip(
     if (time_limit_seconds < 0.0)
         throw std::invalid_argument("SCIP set packing time limit must be nonnegative");
 
-    SCIP* raw_scip = nullptr;
-    check(SCIPcreate(&raw_scip));
-    std::unique_ptr<SCIP, ScipDeleter> scip(raw_scip);
+    auto scip = scip_utils::create();
     const bool enable_solver_output = logging::enabled(log_level);
-    install_message_handler(scip.get(), enable_solver_output);
+    scip_utils::install_message_handler(scip.get(), enable_solver_output, scip_message_warning);
     check(SCIPincludeDefaultPlugins(scip.get()));
     apply_settings(scip.get(), time_limit_seconds, root_cut_rounds, root_only, enable_solver_output);
     check(SCIPcreateProbBasic(scip.get(), "heuristic-set-packing"));
@@ -268,7 +183,7 @@ RootSetPackingSolution solve_root_set_packing_scip(
     std::vector<std::vector<SCIP_VAR*>> row_vars(static_cast<std::size_t>(row_count));
     std::vector<std::vector<SCIP_VAR*>> forced_row_vars(static_cast<std::size_t>(forced_row_count));
     for (const RootSetPackingColumnView& column : columns) {
-        validate_column(column, leaf_count, row_count, forced_row_count, column_count);
+        detail::validate_packing_column(column, leaf_count, row_count, forced_row_count, column_count);
         if (column.leaves.size() < 2)
             continue;
 
@@ -419,7 +334,7 @@ RootSetPackingSolution solve_root_set_packing_highs(
     std::vector<std::vector<HighsInt>> row_columns(static_cast<std::size_t>(row_count));
     std::vector<std::vector<HighsInt>> forced_row_columns(static_cast<std::size_t>(forced_row_count));
     for (const RootSetPackingColumnView& column : columns) {
-        validate_column(column, leaf_count, row_count, forced_row_count, column_count);
+        detail::validate_packing_column(column, leaf_count, row_count, forced_row_count, column_count);
         if (column.leaves.size() < 2)
             continue;
 

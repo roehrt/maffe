@@ -390,28 +390,6 @@ void append_closed_blocks(std::vector<std::vector<int>>& dst, const std::vector<
     );
 }
 
-[[nodiscard]] Result combine_cluster_summaries(ClusterSummary first, ClusterSummary second) {
-    Result combined{
-        .partition = {},
-        .feasible = true,
-    };
-    append_closed_blocks(combined.partition, first.closed_blocks);
-    append_closed_blocks(combined.partition, second.closed_blocks);
-    if (!first.bridge_block.empty() && !second.bridge_block.empty()) {
-        std::vector<int> merged = std::move(first.bridge_block);
-        merged.insert(merged.end(), second.bridge_block.begin(), second.bridge_block.end());
-        std::ranges::sort(merged);
-        combined.partition.push_back(std::move(merged));
-    } else {
-        if (!first.bridge_block.empty())
-            combined.partition.push_back(std::move(first.bridge_block));
-        if (!second.bridge_block.empty())
-            combined.partition.push_back(std::move(second.bridge_block));
-    }
-    detail::sort_partition_blocks(combined.partition);
-    return combined;
-}
-
 struct SelectedCluster {
     int cluster_id = -1;
     int reduced_size = 0;
@@ -732,7 +710,7 @@ struct TopEntryWorse {
                 attach_cluster,
                 false
             );
-            return combine_cluster_summaries(std::move(top_summary), std::move(bottom_summary));
+            return detail::combine_side_summaries(std::move(top_summary), std::move(bottom_summary));
         },
         .objective_offset = top_closed_count + bottom_closed_count,
     };

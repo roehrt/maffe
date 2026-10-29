@@ -165,7 +165,7 @@ void add_column(
 }
 
 void add_rows(Highs& highs, const RootMasterLayout& layout) {
-    for (int row = 0; row < layout.vertex_row_count; ++row)
+    for (int row = 0; row < layout.row_count; ++row)
         check(highs.addRow(-highs.getInfinity(), 1.0, 0, nullptr, nullptr));
 }
 
@@ -226,20 +226,9 @@ void add_rows(Highs& highs, const RootMasterLayout& layout) {
 ) {
     try {
         return build_root_master_column(instance, layout, leaves);
-    } catch (const std::invalid_argument& ex) {
-        if (std::string_view(ex.what()) == "column leaf set is disconnected by cuts")
-            return std::nullopt;
-        throw;
+    } catch (const DisconnectedColumn&) {
+        return std::nullopt;
     }
-}
-
-[[nodiscard]] Result singleton_solution(const int leaves) {
-    Result result;
-    result.feasible = true;
-    result.partition.reserve(leaves);
-    for (int leaf = 0; leaf < leaves; ++leaf)
-        result.partition.push_back({leaf});
-    return result;
 }
 
 [[nodiscard]] Result greedy_set_packing_solution(
@@ -381,7 +370,7 @@ RootLpResult solve_root_lp_with_highs(
                         continue;
                     auto column = try_build_root_master_column(instance, result.layout, block);
                     if (!column.has_value() || inserted_columns.contains(column->leaves) ||
-                        root_master_reduced_cost(result.layout, *column, flat_row_duals) >= -constants::root_lp_reduced_cost_tol) {
+                        root_master_reduced_cost(*column, flat_row_duals) >= -constants::root_lp_reduced_cost_tol) {
                         continue;
                     }
 
@@ -438,7 +427,7 @@ RootLpResult solve_root_lp_with_highs(
     } catch (const RootLpTimeout&) {
         if (allow_abort_with_incumbent) {
             if (!result.heuristic_solution.has_value())
-                result.heuristic_solution = singleton_solution(instance.trees.front().leaves());
+                result.heuristic_solution = detail::singleton_result(instance.trees.front().leaves());
             result.interrupted = true;
             if (logging::enabled(log_level)) {
                 logging::line(std::format(

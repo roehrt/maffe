@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <chrono>
 #include <format>
+#include <iterator>
+#include <utility>
 #include <optional>
 #include <stdexcept>
 #include <vector>
@@ -16,6 +18,20 @@
 #endif
 
 namespace maffe::detail {
+
+// Join the two sides of a cluster, including their possible bridge component.
+template <class Summary>
+[[nodiscard]] Result combine_side_summaries(Summary first, Summary second) {
+    Result result{.partition = std::move(first.closed_blocks)};
+    result.partition.insert(result.partition.end(),
+        std::make_move_iterator(second.closed_blocks.begin()),
+        std::make_move_iterator(second.closed_blocks.end()));
+    first.bridge_block.insert(first.bridge_block.end(), second.bridge_block.begin(), second.bridge_block.end());
+    if (!first.bridge_block.empty())
+        result.partition.push_back(std::move(first.bridge_block));
+    sort_partition_blocks(result.partition);
+    return result;
+}
 
 struct RelatedSideResults {
     Result with_result;
@@ -104,12 +120,14 @@ template <class Solve>
 
     const auto trees = build_binary_tree_views(with_instance);
     const int placeholder = with_instance.trees.front().leaves() - 1;
-    for (int i = 0; i < static_cast<int>(without_result.partition.size()); ++i) {
-        Result candidate = without_result;
-        candidate.partition[i].push_back(placeholder);
-        sort_partition_blocks(candidate.partition);
-        if (partition_feasible(trees, candidate.partition))
+    Result candidate = without_result;
+    for (auto& block : candidate.partition) {
+        block.push_back(placeholder);
+        if (partition_feasible(trees, candidate.partition)) {
+            sort_partition_blocks(candidate.partition);
             return candidate;
+        }
+        block.pop_back();
     }
     return std::nullopt;
 }
@@ -122,7 +140,7 @@ template <class Solve>
     SubinstanceStats& stats
 ) {
     std::vector<std::vector<int>> without_columns;
-    const Result without_result = solve_subinstance(stats, without_instance, [&] {
+    Result without_result = solve_subinstance(stats, without_instance, [&] {
         return context.solve_residual(
             without_instance,
             nullptr,
@@ -131,10 +149,10 @@ template <class Solve>
             objective_offset
         );
     });
-    if (const auto extended = try_extend_with_placeholder(with_instance, without_result)) {
+    if (auto extended = try_extend_with_placeholder(with_instance, without_result)) {
         return RelatedSideResults{
-            .with_result = *extended,
-            .without_result = without_result,
+            .with_result = std::move(*extended),
+            .without_result = std::move(without_result),
         };
     }
 
@@ -155,7 +173,7 @@ template <class Solve>
                 objective_offset
             );
         }),
-        .without_result = without_result,
+        .without_result = std::move(without_result),
     };
 }
 

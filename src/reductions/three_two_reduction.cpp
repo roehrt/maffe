@@ -5,13 +5,13 @@
 #include <algorithm>
 #include <optional>
 #include <span>
+#include <tuple>
 #include <vector>
 
 namespace maffe {
 namespace {
 
 struct ThreeTwoCandidate {
-    int cherry_tree = -1;
     int cut_tree = -1;
     int a = -1;
     int b = -1;
@@ -81,7 +81,7 @@ struct ThreeTwoCandidate {
     return hanging;
 }
 
-[[nodiscard]] std::vector<ThreeTwoCandidate> find_three_two_candidates(const AnnotatedInstance& instance) {
+[[nodiscard]] std::optional<ThreeTwoCandidate> find_best_three_two_candidate(const AnnotatedInstance& instance) {
     if (!valid_tree_count(instance))
         return {};
     std::vector children = {
@@ -93,7 +93,7 @@ struct ThreeTwoCandidate {
         detail::subtree_leaf_counts(instance.trees[1], children[1]),
     };
 
-    std::vector<ThreeTwoCandidate> candidates;
+    std::optional<ThreeTwoCandidate> best;
     for (int cherry_tree = 0; cherry_tree < 2; ++cherry_tree) {
         const int other_tree = cherry_tree ^ 1;
         for (int node = instance.trees[cherry_tree].leaves(); node < instance.trees[cherry_tree].vertices(); ++node) {
@@ -109,28 +109,19 @@ struct ThreeTwoCandidate {
             if (!hanging)
                 continue;
 
-            candidates.push_back(ThreeTwoCandidate{
-                .cherry_tree = cherry_tree,
+            const ThreeTwoCandidate candidate{
                 .cut_tree = other_tree,
                 .a = a,
                 .b = b,
                 .cut_edge = *hanging,
                 .subtree = subtree[other_tree][*hanging],
-            });
+            };
+            if (!best || std::tie(best->subtree, best->cut_tree, best->cut_edge, best->a, best->b) <
+                std::tie(candidate.subtree, candidate.cut_tree, candidate.cut_edge, candidate.a, candidate.b))
+                best = candidate;
         }
     }
-    return candidates;
-}
-
-[[nodiscard]] std::optional<ThreeTwoCandidate> find_best_three_two_candidate(const AnnotatedInstance& instance) {
-    const auto candidates = find_three_two_candidates(instance);
-    if (candidates.empty())
-        return std::nullopt;
-
-    return *std::max_element(candidates.begin(), candidates.end(), [](const auto& lhs, const auto& rhs) {
-        return std::tuple(lhs.subtree, lhs.cut_tree, lhs.cut_edge, lhs.a, lhs.b) <
-            std::tuple(rhs.subtree, rhs.cut_tree, rhs.cut_edge, rhs.a, rhs.b);
-    });
+    return best;
 }
 
 } // namespace

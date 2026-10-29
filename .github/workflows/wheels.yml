@@ -1,0 +1,241 @@
+name: Python wheels
+
+on:
+  pull_request:
+  push:
+    branches: [main, unrooted, pypi-packaging]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Platforms to build and publish
+        type: choice
+        options: [all, linux, windows]
+        default: all
+      publish_testpypi:
+        description: Publish the tested wheels to TestPyPI
+        type: boolean
+        default: false
+      publish_pypi:
+        description: Publish to PyPI after TestPyPI checks pass
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    # Release commits are built by their tag, avoiding a duplicate branch build.
+    if: github.ref_type != 'branch' || !contains(github.event.head_commit.message, '[release-tag]')
+    runs-on: ubuntu-24.04
+    outputs:
+      build_matrix: ${{ steps.plan.outputs.build_matrix }}
+      test_matrix: ${{ steps.plan.outputs.test_matrix }}
+      experimental: ${{ steps.plan.outputs.experimental }}
+      publish_testpypi: ${{ steps.plan.outputs.publish_testpypi }}
+      publish_pypi: ${{ steps.plan.outputs.publish_pypi }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # v<version> releases all supported platforms; v<version>-linux or
+      # v<version>-windows adds just that platform to the same release.
+      # A branch commit marked [windows-only] builds Windows without publishing.
+      - id: plan
+        run: python scripts/wheel_ci_plan.py
+
+  wheels:
+    needs: plan
+    name: ${{ matrix.platform.name }} / ${{ matrix.python }}
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.build_matrix) }}
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+      CIBW_CONFIG_SETTINGS: 'compile-args=-j2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheel and test the installed package
+        run: python -m cibuildwheel --only ${{ matrix.python }}-${{ matrix.platform.identifier }} --output-dir dist-wheels
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform.name }}-${{ matrix.python }}
+          path: dist-wheels/*.whl
+          if-no-files-found: error
+
+  additional-platform-wheels:
+    needs: plan
+    if: needs.plan.outputs.experimental == 'true'
+    name: ${{ matrix.platform.name }} / ${{ matrix.python }}
+    runs-on: ${{ matrix.platform.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        python: [cp311, cp312, cp313, cp314]
+        platform:
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+            identifier: manylinux_aarch64
+          - name: macos-arm64
+            runner: macos-15
+            identifier: macosx_arm64
+          - name: macos-x86_64
+            runner: macos-15-intel
+            identifier: macosx_x86_64
+    env:
+      CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
+      CMAKE_BUILD_PARALLEL_LEVEL: '2'
+      CIBW_CONFIG_SETTINGS: 'compile-args=-j2'
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install cibuildwheel==3.4.1
+      - name: Build wheel and test the installed package
+        run: python -m cibuildwheel --only ${{ matrix.python }}-${{ matrix.platform.identifier }} --output-dir dist-wheels
+      - uses: actions/upload-artifact@v4
+        with:
+          name: experimental-wheels-${{ matrix.platform.name }}-${{ matrix.python }}
+          path: dist-wheels/*.whl
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: [plan, wheels]
+    if: needs.plan.outputs.publish_testpypi == 'true'
+    runs-on: ubuntu-24.04
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/maffe/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+      - name: Publish tested wheels to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  verify-testpypi:
+    name: Verify TestPyPI artifact hashes
+    needs: publish-testpypi
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+      - run: python scripts/verify_published_wheels.py testpypi dist
+
+  test-testpypi:
+    name: Install from TestPyPI (${{ matrix.platform }}, ${{ matrix.python }})
+    needs: [plan, verify-testpypi]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.test_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python scripts/install_published_wheel.py testpypi
+      - name: Test the installed package
+        if: runner.os != 'Windows'
+        run: python tests/test_python.py
+      - name: Test without compiler DLLs on the search path
+        if: runner.os == 'Windows'
+        run: python scripts/test_windows_wheel.py tests/test_python.py
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [plan, wheels, verify-testpypi, test-testpypi]
+    if: needs.plan.outputs.publish_pypi == 'true'
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/project/maffe/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+      - name: Publish the tested wheels to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://upload.pypi.org/legacy/
+
+  verify-pypi:
+    name: Verify PyPI artifact hashes
+    needs: publish-pypi
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+      - run: python scripts/verify_published_wheels.py pypi dist
+
+  test-pypi:
+    name: Install from PyPI (${{ matrix.platform }}, ${{ matrix.python }})
+    needs: [plan, verify-pypi]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.test_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python scripts/install_published_wheel.py pypi
+      - name: Test the installed package
+        if: runner.os != 'Windows'
+        run: python tests/test_python.py
+      - name: Test without compiler DLLs on the search path
+        if: runner.os == 'Windows'
+        run: python scripts/test_windows_wheel.py tests/test_python.py

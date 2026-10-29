@@ -76,9 +76,10 @@ enum class BinaryValidation : std::uint8_t {
     const std::vector<int>& leaf_map,
     const char* const empty_error = "restricted tree removed all leaves"
 ) {
+    const auto leaves = std::ranges::count_if(leaf_map, [](const int value) { return value >= 0; });
     Tree reduced{
-        .parent = std::vector<int>(std::ranges::count_if(leaf_map, [](const int value) { return value >= 0; }), -2),
-        .edge_state = std::vector<EdgeState>(std::ranges::count_if(leaf_map, [](const int value) { return value >= 0; }), EdgeState::UNKNOWN),
+        .parent = std::vector<int>(leaves, -2),
+        .edge_state = std::vector<EdgeState>(leaves, EdgeState::UNKNOWN),
     };
     const auto children = tree_children(tree, CutHandling::INCLUDE_CUT);
     int next = static_cast<int>(reduced.parent.size());
@@ -122,17 +123,6 @@ enum class BinaryValidation : std::uint8_t {
     for (const auto& tree : instance.trees)
         reduced.trees.push_back(restrict_tree_by_leaf_map(tree, leaf_map, empty_error));
     return reduced;
-}
-
-[[nodiscard]] inline AnnotatedInstance restrict_instance_to_leaves(
-    const AnnotatedInstance& instance,
-    const std::span<const int> leaves,
-    const char* const empty_error = "restricted tree removed all leaves"
-) {
-    std::vector<int> leaf_map(instance.trees.front().leaves(), -1);
-    for (int i = 0; i < static_cast<int>(leaves.size()); ++i)
-        leaf_map[leaves[i]] = i;
-    return restrict_instance_by_leaf_map(instance, leaf_map, empty_error);
 }
 
 } // namespace maffe::detail

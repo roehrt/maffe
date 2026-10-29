@@ -1729,13 +1729,7 @@ private:
         if (static_cast<int>(second_edge_states.size()) != base_instance.trees[second_tree].vertices())
             throw std::invalid_argument("invalid second-tree edge states");
         const bool second_tree_changed =
-            cache.dynamic_second_states.size() != second_edge_states.size() ||
-            !std::equal(
-                cache.dynamic_second_states.begin(),
-                cache.dynamic_second_states.end(),
-                second_edge_states.begin(),
-                second_edge_states.end()
-            );
+            !std::ranges::equal(cache.dynamic_second_states, second_edge_states);
         if (!cache.oracle || second_tree_changed) {
             Tree second = base_instance.trees[second_tree];
             second.edge_state.assign(second_edge_states.begin(), second_edge_states.end());

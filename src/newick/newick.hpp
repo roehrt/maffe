@@ -17,6 +17,5 @@ struct Tree {
 };
 
 Tree parse(std::string_view text);
-std::string write(const Tree& tree);
 
 } // namespace maffe::newick

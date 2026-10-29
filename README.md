@@ -7,7 +7,30 @@ It won the first place in all three tracks (Exact, Heuristic, Lower Bound) of th
 5.5. We extensively tested the solver with fuzzing and [STRIDE instances](https://pace2026.imada.sdu.dk/) and take responsibility for
 its correctness.
 
-## Dependencies
+## Python Library
+
+```sh
+python -m pip install maffe
+```
+
+Usage example:
+
+```python
+import maffe
+
+trees = ["((a,b),(c,d));", "((a,c),(b,d));"]
+partition = maffe.solve(trees) # solve_unrooted for unrooted trees
+print(partition) # [['a', 'b'], ['c'], ['d']]
+forest = maffe.restrict_solution(trees, partition)
+print(forest) # ['(a,b);', 'c;', 'd;']
+
+distance = maffe.rspr_dist(*trees)
+print(distance) # 2
+```
+
+## Build From Source
+
+### Dependencies
 
 - C++23 compiler
 - Meson >= 1.3
@@ -22,7 +45,7 @@ The competition build also uses ConicBundle for the heuristic binary.
 The Meson build script will automatically download and build all required solver dependencies.
 We optionally support Gurobi as (I)LP backend and expose Python bindings.
 
-## Build
+### Build
 
 On Debian/Ubuntu:
 
@@ -46,7 +69,7 @@ Run the solver with
 
 where `instances.trees` contains a list of bifurcating phylogenetic trees. 
 
-## Competition Build
+### Competition Build
 
 To build the competition binaries, which were submitted to optil.io and to the PACE Challenge 2026, use the Docker-based build script:
 
